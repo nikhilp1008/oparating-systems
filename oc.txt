@@ -1,0 +1,153 @@
+#include <stdio.h>
+
+#include <ctype.h>
+
+#include <pthread.h>
+
+#define MAX 5
+
+/**** These are global ***/
+
+pthread_mutex_t lock_it = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t write_it = PTHREAD_COND_INITIALIZER;
+
+typedef enum { FALSE, TRUE } boolean;
+
+typedef struct { /* A small data buffer */
+
+char buffer[MAX];
+
+int how_many; /* # of chars in buffer */
+
+} BUFFER;
+
+BUFFER share = {"", 0}; /* start empty */
+
+void *read_some(void *), *write_some(void *);
+
+boolean finished = FALSE;
+
+void main(void) {
+
+pthread_t t_read;
+
+pthread_t t_write;
+
+/* create threads */
+
+pthread_create(&t_read, NULL, read_some, (void *) NULL);
+
+pthread_create(&t_write, NULL, write_some,(void *) NULL);
+
+pthread_join(t_write, (void **) NULL); /* wait for writer */
+
+pthread_mutex_destroy( &lock_it ); /* clean up */
+
+pthread_cond_destroy( &write_it );
+
+} /* end main */
+
+/***
+
+* Code to fill the buffer
+
+***/
+
+void * read_some(void * junk) {
+
+int ch;
+
+printf("R %2d: Starting\n", pthread_self());
+
+while (!finished) {
+
+pthread_mutex_lock(&lock_it);
+
+if (share.how_many != MAX) { /* buffer is not full */
+
+ch = getc(stdin);
+
+if ( ch == EOF ) { /* end-of-file */
+
+share.buffer[share.how_many] = (char) NULL;
+
+share.how_many = MAX;
+
+finished = TRUE; /* we are all done */
+
+printf("R %2d: Signaling done\n", pthread_self());
+
+pthread_cond_signal(&write_it); /* signal condition var */
+
+pthread_mutex_unlock(&lock_it);
+
+break;
+
+} else {
+
+share.buffer[share.how_many++] = ch;
+
+printf("R %2d: Got char [%c]\n", pthread_self( ),
+
+isalnum(ch) ? ch : '#'); /* keep output pretty */
+
+if ( share.how_many == MAX ) { /* if full */
+
+printf("R %2d: Signaling full\n", pthread_self());
+
+pthread_cond_signal(&write_it);
+
+} // end if
+
+} // end if
+
+} // end if
+
+pthread_mutex_unlock(&lock_it);
+
+} // end while
+
+printf("R %2d: Exiting\n", pthread_self());
+
+return NULL;
+
+} // end read_some
+
+/***
+
+* Code to write (display) buffer
+
+***/
+
+void * write_some(void * junk) {
+
+int i;
+
+printf("W %2d: Starting\n", pthread_self());
+
+while (!finished ) {
+
+pthread_mutex_lock(&lock_it);
+
+printf("\nW %2d: Waiting\n", pthread_self());
+
+while (share.how_many != MAX) /* while not full */
+
+pthread_cond_wait(&write_it, &lock_it); /* wait for notify */
+
+printf("W %2d: Writing buffer\n", pthread_self( ));
+
+for( i=0; share.buffer[i] && share.how_many; ++i, share.how_many--)
+
+putchar(share.buffer[i]);
+
+pthread_mutex_unlock(&lock_it);
+
+} // end while
+
+printf("W %2d: Exiting\n", pthread_self( ));
+
+return NULL;
+
+}
